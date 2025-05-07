@@ -1,0 +1,266 @@
+---
+title: "01_setup"
+output: html_document
+date: "2025-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/2298350G/Documents/My Documents/Moths/pre-PhD/E_silaceata/voltinism')
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+library(viridis)
+library(mixtools)
+```
+
+
+
+
+# read in data
+
+
+## data frame containing all moth catches in Rowardennan Rothamsted light trap 1968-2024
+
+
+```{r}
+daily <- read.csv("data/Rowardennan all daily data.csv", header = TRUE, sep = ",")
+
+### subset data to just Ecliptopera silaceata
+Esil <- filter(daily, binomial == "Ecliptopera silaceata")
+
+
+#make binomial (species name) a factor
+Esil$binomial <- as.factor(Esil$binomial)
+#convert date from character to date format
+Esil$CalDate <- dmy(Esil$CalDate)
+#make year variable
+Esil$Year<-year(Esil$CalDate)
+#make julian date variable and convert to numeric
+Esil$julian <- strftime(Esil$CalDate, format = "%j")
+Esil$julian<-as.numeric(Esil$julian)
+```
+
+
+
+
+
+# assigning number of flight periods to each year
+
+
+
+## initial visualisation with heat map
+
+
+
+### format data for heat map
+
+```{r}
+#make copy of data frame to edit
+Esil2 <- Esil
+##fill in blank dates in data frame and insert zeroes for absences
+Esil2<-  complete(Esil2,CalDate = seq(as.Date("1968-01-01"), as.Date("2024-12-31"), "day"), fill = list(DailyCount = 0))
+
+#add in julian day to new dates with zero abundance
+Esil2$julian <- strftime(Esil2$CalDate, format = "%j")
+Esil2$julian<-as.numeric(Esil2$julian)
+
+#filter between day of year 100 and 290 for visualisation - all observations fall between these dates
+Esil2<-filter(Esil2,julian>100,julian<290)
+
+#update year variable
+Esil2$Year<-year(Esil2$CalDate)
+
+#convert back to data frame from tibble
+Esil2<-as.data.frame(Esil2)
+
+##log counts for visualisation
+Esil2$logcount <- log(Esil2$DailyCount + 1)
+```
+
+
+
+### make and export heat map
+
+```{r}
+#plot heat map
+heatmap<- ggplot(Esil2, aes(julian, Year, fill= logcount)) + 
+  geom_tile()+
+  scale_fill_viridis(discrete=FALSE, name = "Log Abundance")+
+  theme_bw()+
+  xlab("Day of Year")
+
+#export heat map
+ggsave(filename = "outputs/figures/assigning_n_flight_periods/E_silaceata_heat_map.png",
+       plot = heatmap,
+       device = "png",
+       width = 18,
+       height = 12,
+       units = "cm",
+       dpi = 300,
+       bg = "white")
+
+```
+
+
+
+Heat map suggests two flight periods - test this using Gaussian mixture model.
+
+
+
+## kernel density estimates
+
+
+
+### Validate which years have one or two flight periods visually by plotting data over kernel density estimates
+
+```{r}
+#format data by creating vector where each observation is one individual moth and the value of each observation in the vector is the week of year that the individual was captured
+ 
+#make week variable
+ Esil$week <- week(Esil$CalDate)
+
+ #make empty list
+lw_all <- list()
+
+#loop through data repeating the week of year of each catch for the corresponding number of times that there were moths captured during that week
+for(i in 1:nrow(Esil)){
+  lw_all[[i]] <- rep(Esil[i,12], times = Esil[i,8])
+}
+
+#convert list to vector
+(vw_all<-unlist(lw_all))
+
+
+
+
+
+##kernel density plots with vertical lines to show moth catches in each year
+
+#convert year to factor
+Esil$Year <- as.factor(Esil$Year)
+
+#loop through each year of the data set in turn
+for(x in levels(Esil$Year)){
+  
+  
+  df <- filter(Esil, Year == x)
+  df$Year <- as.character(df$Year)
+  df$Year <- as.numeric(df$Year)
+
+  #create empty list
+lw_sub <- list()
+
+#loop through each week in the data set and repeat the week for the corresponding number of moths caught during that week
+for(i in 1:nrow(df)){
+  lw_sub[[i]] <- rep(df[i,12], times = df[i,8])
+}
+
+#convert list to vector
+(vw_sub<-unlist(lw_sub))
+
+#create file pathway to save plots
+filepathroot <- "outputs/figures/assigning_n_flight_periods/kd_mmposterior/plot"
+plotnum <- x
+filepath1 <- paste(filepathroot, plotnum, sep = "_")
+filepath2 <- paste(filepath1, ".png", sep = "")
+
+#make kernel density estimate using data for all years to act as base for plot
+dens <- density(vw_all)
+
+#save png
+png(filepath2)
+#plot kernel density for all years
+plot(dens)
+#add lines to kernel density for observations of individuals in each year
+abline(v = vw_sub)
+title(main = x)
+dev.off()
+
+}
+
+
+```
+
+
+
+
+
+
+
+## Gaussian mixture model
+
+### statistical test for how many flight periods each year
+
+
+```{r}
+
+#gaussian mixture model assuming equal split between groups, means of week 21 and week 32, and sigma of 1
+mmw <- normalmixEM(vw_all, lambda = .5, mu = c(21, 32), sigma = 1)
+summary(mmw)
+plot(mmw, which = 2)
+ 
+#make data frame with posterior probability of each data point belonging to each flight period
+pdfw <- as.data.frame(mmw$posterior)
+
+
+#make vector for each year repeated as many times as there were moths caught in that year
+ly <- list()
+
+for(i in 1:nrow(Esil)){
+  ly[[i]] <- rep(Esil[i,10], times = Esil[i,8])
+}
+
+(vy<-unlist(ly))
+
+
+#add year and week to data set of posterior probabilities for each observation belonging to each flight period
+pdf2$Year <- vy
+pdf2$week <- vw_all
+
+#filter to only observations with high probability of belonging to second flight period
+pdf2sub <- filter(pdf2, comp.2 > 0.999)
+
+
+#get list of years with high probability of two flight periods
+pdf2sub$Year <- as.character(pdf2sub$Year)
+pdf2sub$Year <- as.factor(pdf2sub$Year)
+years_2_fp <- c(levels(pdf2sub$Year))
+
+
+
+
+
+### make data set with year and number of flight periods
+
+#make data frame containing all years throughout duration of data set
+fpdf <- data.frame(Year = c(1968:2024))
+
+
+##get annual totals to remove years where no individuals were observed - in these years we cannot be sure how many flight periods there were
+annualtotals <- Esil %>% group_by(Year) %>% summarise(total = sum(DailyCount))
+
+#remove years in which no individuals were caught
+fpdf <- filter(fpdf, Year %in% annualtotals$Year)
+
+#add number of flight periods in each year
+fpdf <- mutate(fpdf, Gen = case_when(
+  Year %in% years_2_fp ~ 1,
+  .default = 0
+))
+
+
+
+##export data
+write.csv(fpdf, "outputs/flight_periods.csv")
+
+```
+
+
+
+
+
+
+
+

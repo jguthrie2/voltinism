@@ -1,0 +1,434 @@
+---
+title: "02_sliding_window_analysis"
+output: html_document
+date: "2025-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/2298350G/Documents/My Documents/Moths/pre-PhD/E_silaceata/voltinism')
+library(dplyr)
+library(ggplot2)
+library(lmtest)
+library(RcppRoll)
+library(data.table)
+library(pscl)
+```
+
+
+
+## read in data
+
+```{r}
+fpdf <- read.csv("outputs/flight_periods.csv", header = TRUE, sep = ",")
+fpdf <- subset(fpdf, select = -X)
+```
+
+
+
+## does number of flight periods change with year?
+
+
+```{r}
+yearmod1 <- glm(Gen~ Year, data = fpdf, family = "binomial")
+summary(yearmod1)#significant effect
+
+#check residuals
+hist(resid(yearmod1))
+plot(yearmod1)
+
+#run null model
+yearmodnull <- glm(Gen ~ 1, data = fpdf, family = "binomial")
+summary(yearmodnull)
+
+#likelihood ratio test - is year model better than null model
+lrtest(yearmod1,yearmodnull)###year model is significantly better than null model
+```
+
+
+## read in temperature data
+
+
+sourced from HAD-UK Met Office database
+
+```{r}
+maxtemp<-read.table("data/max_temp_data.csv", header=T, sep="," )
+maxtemp$date<-ymd(maxtemp$date)
+maxtemp<-subset(maxtemp,select= -X)
+
+mintemp<-read.table("data/min_temp_data.csv", header=T, sep="," )
+mintemp$date<-dmy(mintemp$date)
+mintemp<-subset(mintemp,select= -X)
+
+#merge temperature data
+alltemp<-merge(mintemp,maxtemp,by="date")
+alltemp$Year<-year(alltemp$date)
+alltemp$julian <- strftime(alltemp$date, format = "%j")
+alltemp$julian<-as.numeric(alltemp$julian)
+```
+
+
+
+
+
+## temperature variables - adjust temperature values to start on day 266 of previous year - latest catch date of second flight period is day 265
+
+```{r}
+alltempnoleapyear=subset(alltemp,!(Year %in% c(1968, 1972, 1976, 1980, 1984, 1988, 1992, 1996, 2000, 2004, 2008, 2012, 2016,2020)))
+alltempleapyear=subset(alltemp,(Year %in% c(1968, 1972, 1976, 1980, 1984, 1988, 1992, 1996, 2000, 2004, 2008, 2012, 2016,2020)))
+
+#filter to after day 265
+alltempnoleapyear2nd<-filter(alltempnoleapyear,julian>265)
+#subtract 265 from julian day so that day of year 265 is day zero
+alltempnoleapyear2nd$newjulian<-alltempnoleapyear2nd$julian-265
+#real year value
+alltempnoleapyear2nd$realyear<-alltempnoleapyear2nd$Year
+#adjusted year (later half of each year (post-day 265) will now make up the first part of the following year)
+alltempnoleapyear2nd$Year<-alltempnoleapyear2nd$Year+1
+
+#same for leap years
+alltempleapyear2nd<-filter(alltempleapyear,julian>266)
+alltempleapyear2nd$newjulian<-alltempleapyear2nd$julian-266
+alltempleapyear2nd$realyear<-alltempleapyear2nd$Year
+alltempleapyear2nd$Year<-alltempleapyear2nd$Year+1
+
+
+#early part of year - pre-day265 - add 100 to julian day (difference between 365 and 265) so that the start of each new year is continuous with the later half of the previous year
+alltemp1st<-filter(alltemp,julian<=265)
+alltemp1st$newjulian<-alltemp1st$julian+100
+alltemp1st$realyear<-alltemp1st$Year
+
+alltempnj1<-rbind(alltempnoleapyear2nd,alltempleapyear2nd,alltemp1st)
+
+
+## subset to only include dates before emergence of 2nd flight period - the driver of the emergence of the second flight period realistically must occur before the second flight period begins - 
+
+#checking the posterior probabilities of belonging to either flight period from the gaussian mixture model (pdf2 data set generated in script 01) shows that the probability of belonging to flight period 2 is only sufficiently high after week 30 - the mid point of week 30 is day of year 213, so subset the dates to those prior to day 213, newjulian 313
+
+alltempnj<-filter(alltempnj1,newjulian<313)
+```
+
+
+
+
+## calculate sliding window temperature variables
+
+### function to calculate sliding temperature windows of varying widths starting on each day of the data  - function adapted from https://stackoverflow.com/questions/18448082/r-data-table-with-rollapply/23533485#23533485 
+
+```{r}
+windowed.average <- function(input.table,
+                             window.width,
+                             id.cols = names(input.table)[2],
+                             index.col = names(input.table)[3],
+                             val.col = names(input.table)[1]) {
+  require(RcppRoll)
+#average temperature in a window of given width
+  avg.with.group <- 
+    input.table[,roll_mean(get(val.col), n = window.width, align = "center"),by=c(id.cols)]
+ #average date within this window (gives centre of window)
+   avg.index <- 
+    input.table[,roll_mean(get(index.col), n = window.width, align = "center"),by=c(id.cols)]$V1
+
+  output.table <- data.table(
+    Group = avg.with.group,
+    Index = avg.index)
+
+  # rename columns to match inputs
+  setnames(output.table, old=colnames(output.table),
+           new = c(id.cols,val.col,index.col))
+  
+  
+  #add data on date and window width to data table
+  #window width variable
+  #w <- paste("w", i, sep = "_")
+  #create adjusted julian date variable for each window
+output.table$w<- paste("w", window.width, sep = "_")
+  output.table$julian<-paste(output.table$w,output.table$newjulian,sep="_")
+  
+    #create separate column for each window
+output.table2<-dcast(output.table, Year ~ julian, value.var = val.col, drop=FALSE)
+
+output.table2 <- subset(output.table2, select = -Year)
+
+
+}
+
+```
+
+
+
+
+## run function for maximum temperature data
+
+
+### create sliding windows for all days with window length varying from 5-60 days
+
+```{r}
+##maximum temperature data
+#get rid of unnecessary variables and format data correctly
+tmaxnj<-subset(alltempnj,select=c(tmax,Year,newjulian))
+#convert to data table
+tmaxnj<-as.data.table(tmaxnj)
+
+
+
+
+##run function for multiple window widths
+
+#create empty list
+datalist = list()
+
+#for loop over different window widths
+for(i in c(5:60)){
+  
+  outputd2 <- windowed.average(tmaxnj, window.width = i)
+  
+  datalist[[i]] <- outputd2 
+}
+
+#combine outputs for each window width
+  tmaxwindows = do.call(cbind, datalist)
+  #add variable for year
+  tmaxwindows$Year <- 1968:2024
+
+  tmaxwindows <- as.data.frame(tmaxwindows)
+```
+
+
+
+
+
+## run GLMs on maximum temperature window data
+
+```{r}
+#make data frame including windows and generations
+fptmax<-left_join(fpdf,tmaxwindows,by="Year")
+
+#glms of gen~tmax for each window
+#predictor variables
+fptmaxpredictors<-subset(fptmax,select=-c(Year,Gen))
+#number of regressions based on number of windows
+tmaxnreg<-ncol(fptmaxpredictors)
+# run n regressions
+tmax_glms <- lapply(1:tmaxnreg, function(x) glm(fptmax$Gen ~ fptmaxpredictors[,x],family=binomial))
+
+#list of named characters of pseudo R2 values for each glm
+r2tmax<-lapply(tmax_glms,function(x) pR2(x)[5])
+#convert to normal list
+r2tmax2<-lapply(r2tmax, function(x) as.numeric(unlist(x)))
+#convert list to vector
+r2tmax2v <- unlist(r2tmax2, use.names = FALSE)
+#make data frame with window names
+namestmax<-colnames(fptmaxpredictors)
+tmaxswoutput<-as.data.frame(namestmax)
+#add pseudo r2 values to data frame with window names
+tmaxswoutput$r2<-r2tmax2v
+
+
+#add effect size
+estmax<-lapply(tmax_glms,function(x) coef(summary(x))[2,1])
+#convert to normal list
+estmax2<-lapply(estmax, function(x) as.numeric(unlist(x)))
+#convert list to vector
+estmax2v <- unlist(estmax2, use.names = FALSE)
+#add effect size values to data frame with window names
+tmaxswoutput$es<-estmax2v
+#order by descending pseudo R2 value
+tmaxswoutput <- tmaxswoutput[rev(order(tmaxswoutput$r2)),]
+
+
+
+##export glm output summary
+write.csv(tmaxswoutput, "outputs/tmax_sliding_window_glms_r2_effect_size.csv")
+
+
+##best model - highest R2
+#w_5_146
+#window length 5 days
+#centred on day 146
+modtmax5_146<-glm(Gen~w_5_146,data=fptmax,family=binomial)
+summary(modtmax5_146)
+#day 146 - actually 46 - starts day 44, ends day 48 
+
+```
+
+
+
+
+## make sliding windows for minimum temperature 
+
+### window width varying from 5-60 days
+
+```{r}
+##minimum temperature data
+#get rid of unnecessary variables and format data correctly
+tminnj<-subset(alltempnj,select=c(tmin,Year,newjulian))
+#convert to data table
+tminnj<-as.data.table(tminnj)
+
+
+
+
+##run function for multiple window widths
+
+#create empty list
+datalist = list()
+
+#for loop over different window widths
+for(i in c(5:60)){
+  
+  outputd2 <- windowed.average(tminnj, window.width = i)
+  
+  datalist[[i]] <- outputd2 
+}
+
+#combine outputs for each window width
+  tminwindows = do.call(cbind, datalist)
+  #add variable for year
+  tminwindows$Year <- 1968:2024
+
+  tminwindows <- as.data.frame(tminwindows)
+  
+  
+  
+  
+  #make data frame including windows and generations
+fptmin<-left_join(fpdf,tminwindows,by="Year")
+
+#glms of gen~tmin for each window
+#predictor variables
+fptminpredictors<-subset(fptmin,select=-c(Year,Gen))
+#number of regressions based on number of windows
+tminnreg<-ncol(fptminpredictors)
+# run n regressions
+tmin_glms <- lapply(1:tminnreg, function(x) glm(fptmin$Gen ~ fptminpredictors[,x],family=binomial))
+
+#list of named characters of pseudo R2 values for each glm
+r2tmin<-lapply(tmin_glms,function(x) pR2(x)[5])
+#convert to normal list
+r2tmin2<-lapply(r2tmin, function(x) as.numeric(unlist(x)))
+#convert list to vector
+r2tmin2v <- unlist(r2tmin2, use.names = FALSE)
+#make data frame with window names
+namestmin<-colnames(fptminpredictors)
+tminswoutput<-as.data.frame(namestmin)
+#add pseudo r2 values to data frame with window names
+tminswoutput$r2<-r2tmin2v
+
+
+
+#add effect size
+estmin<-lapply(tmin_glms,function(x) coef(summary(x))[2,1])
+#convert to normal list
+estmin2<-lapply(estmin, function(x) as.numeric(unlist(x)))
+#convert list to vector
+estmin2v <- unlist(estmin2, use.names = FALSE)
+#add effect size values to data frame with window names
+tminswoutput$es<-estmin2v
+#order by descending pseudo R2 value
+tminswoutput <- tminswoutput[rev(order(tminswoutput$r2)),]
+
+
+
+##export glm output summary
+write.csv(tminswoutput, "outputs/tmin_sliding_window_glms_r2_effect_size.csv")
+
+
+##best model
+#w_49_276
+#window length 49 days
+#centred on day 276
+modtmin49_276<-glm(Gen~w_49_276,data=fptmin,family=binomial)
+summary(modtmin49_276)
+#day 276 - actually 176 - day 176 is day 25 - window starts day 152, ends day 200 
+```
+
+
+
+## mean temperature sliding windows
+
+```{r}
+##mean temperature data
+alltempnj$tmean <- (alltempnj$tmin + alltempnj$tmax) / 2
+#get rid of unnecessary variables and format data correctly
+tmeannj<-subset(alltempnj,select=c(tmean,Year,newjulian))
+#convert to data table
+tmeannj<-as.data.table(tmeannj)
+
+
+
+
+##run function for multiple window widths
+
+#create empty list
+datalist = list()
+
+#for loop over different window widths
+for(i in c(5:60)){
+  
+  outputd2 <- windowed.average(tmeannj, window.width = i)
+  
+  datalist[[i]] <- outputd2 
+}
+
+#combine outputs for each window width
+  tmeanwindows = do.call(cbind, datalist)
+  #add variable for year
+  tmeanwindows$Year <- 1968:2024
+
+  tmeanwindows <- as.data.frame(tmeanwindows)
+  
+  
+  
+  
+  #make data frame including windows and generations
+fptmean<-left_join(fpdf,tmeanwindows,by="Year")
+
+#glms of gen~tmean for each window
+#predictor variables
+fptmeanpredictors<-subset(fptmean,select=-c(Year,Gen))
+#number of regressions based on number of windows
+tmeannreg<-ncol(fptmeanpredictors)
+# run n regressions
+tmean_glms <- lapply(1:tmeannreg, function(x) glm(fptmean$Gen ~ fptmeanpredictors[,x],family=binomial))
+
+#list of named characters of pseudo R2 values for each glm
+r2tmean<-lapply(tmean_glms,function(x) pR2(x)[5])
+#convert to normal list
+r2tmean2<-lapply(r2tmean, function(x) as.numeric(unlist(x)))
+#convert list to vector
+r2tmean2v <- unlist(r2tmean2, use.names = FALSE)
+#make data frame with window names
+namestmean<-colnames(fptmeanpredictors)
+tmeanswoutput<-as.data.frame(namestmean)
+#add pseudo r2 values to data frame with window names
+tmeanswoutput$r2<-r2tmean2v
+
+
+
+#add effect size
+estmean<-lapply(tmean_glms,function(x) coef(summary(x))[2,1])
+#convert to normal list
+estmean2<-lapply(estmean, function(x) as.numeric(unlist(x)))
+#convert list to vector
+estmean2v <- unlist(estmean2, use.names = FALSE)
+#add effect size values to data frame with window names
+tmeanswoutput$es<-estmean2v
+#order by descending pseudo R2 value
+tmeanswoutput <- tmeanswoutput[rev(order(tmeanswoutput$r2)),]
+
+
+##export glm output summary
+write.csv(tmeanswoutput, "outputs/tmean_sliding_window_glms_r2_effect_size.csv")
+
+
+##best model
+#w_22_287.5
+#window length 22 days
+#centred on day 287.5
+modtmean22_287.5<-glm(Gen~w_22_287.5,data=fptmean,family=binomial)
+summary(modtmean22_287.5)
+#day 287.5 - actually 187.5 - day 187 is day 11 - window starts day 177, ends day 198 
+```
+
+
