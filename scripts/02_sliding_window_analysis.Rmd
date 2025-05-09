@@ -22,6 +22,9 @@ library(pscl)
 ```{r}
 fpdf <- read.csv("outputs/flight_periods.csv", header = TRUE, sep = ",")
 fpdf <- subset(fpdf, select = -X)
+
+#temperature data only available up to 2023, so remove 2024 flight period data
+fpdf <- filter(fpdf, Year != 2024)
 ```
 
 
@@ -243,13 +246,9 @@ write.csv(tmaxswoutput, "outputs/tmax_sliding_window_glms_r2_effect_size.csv")
 
 
 ##best model - highest R2
-#w_5_146
-#window length 5 days
-#centred on day 146
-modtmax5_146<-glm(Gen~w_5_146,data=fptmax,family=binomial)
-summary(modtmax5_146)
-#day 146 - actually 46 - starts day 44, ends day 48 
-
+#w_9_48
+modtmax9_48<-glm(Gen~w_9_48,data=fptmax,family=binomial)
+summary(modtmax9_48)
 ```
 
 
@@ -431,4 +430,406 @@ summary(modtmean22_287.5)
 #day 287.5 - actually 187.5 - day 187 is day 11 - window starts day 177, ends day 198 
 ```
 
+
+
+
+
+
+
+# cross-validation
+
+
+## following methods from Simmonds et al (2019), Journal of Animal Ecology
+
+
+
+### first test how the number of years of data included in a training data set and their temporal distance from the test data set affects prediction accuracy
+
+
+wouldn't be particularly informative to use a training and test data set here because the outputs from model predictions are only measurable in the data as 0 or 1 - just compare the effect size from models constructed using different numbers of years to determine how much the prediction and its precision changes
+
+
+50 years of data - divide into groups getting sequentially smaller or bigger by ten years - 11 groups ranging from 10 to 50 years in length
+
+re-run glms and compare effect size and r2 with the full data set 
+
+do effect size and r2 change with start date, end date or data set duration?
+
+1-10
+1-20
+1-30
+1-40
+1-50
+10-20
+10-30
+10-40
+10-50
+20-30
+20-40
+20-50
+30-40
+30-50
+40-50
+
+
+```{r}
+#data for subsamples
+start <- c(rep(fpdf[1,1], times = 5), rep(fpdf[10,1], times = 4), rep(fpdf[20,1], times = 3), rep(fpdf[30,1], times = 2), rep(fpdf[40,1], times = 1))
+
+end <- c(fpdf[10,1], fpdf[20,1], fpdf[30,1], fpdf[40,1], fpdf[50,1], fpdf[20,1], fpdf[30,1], fpdf[40,1], fpdf[50,1], fpdf[30,1], fpdf[40,1], fpdf[50,1], fpdf[40,1], fpdf[50,1], fpdf[50,1])
+
+durations <- c(10,20,30,40,50,10,20,30,40,10,20,30,10,20,10)
+
+startend <- data.frame(start = start, end = end)
+
+
+##make list of temperature data subsets
+
+datasetslist = list()
+
+for(i in 1:nrow(startend)){
+  subdf <- filter(tminnj, Year >= startend[i,1])
+  subdf2 <- filter(subdf, Year <= startend[i,2])
+  datasetslist[[i]] <- subdf2
+}
+
+
+
+#get sliding window estimates for each data subset
+
+
+
+  #function to get 5 best models for a temperature data set
+  subsamplefunc <- function(tempdata){  
+##run function for multiple window widths
+#create empty list
+datalist = list()
+
+#for loop over different window widths
+for(i in c(5:60)){
+  
+  outputd2 <- windowed.average(tempdata, window.width = i)
+  
+  datalist[[i]] <- outputd2 
+}
+
+#combine outputs for each window width
+  tminwindows = do.call(cbind, datalist)
+  #add variable for year
+  tempdata$Year <- as.factor(tempdata$Year)
+  tminwindows$Year <- levels(tempdata$Year)
+
+  tminwindows <- as.data.frame(tminwindows)
+  
+  
+  
+  
+  #make data frame including windows and generations
+  tminwindows$Year <- as.character(tminwindows$Year)
+  tminwindows$Year <- as.numeric(tminwindows$Year)
+fptmin<-left_join(fpdf,tminwindows,by="Year")
+
+#glms of gen~tmin for each window
+#predictor variables
+fptminpredictors<-subset(fptmin,select=-c(Year,Gen))
+#number of regressions based on number of windows
+tminnreg<-ncol(fptminpredictors)
+# run n regressions
+tmin_glms <- lapply(1:tminnreg, function(x) glm(fptmin$Gen ~ fptminpredictors[,x],family=binomial))
+
+#list of named characters of pseudo R2 values for each glm
+r2tmin<-lapply(tmin_glms,function(x) pR2(x)[5])
+#convert to normal list
+r2tmin2<-lapply(r2tmin, function(x) as.numeric(unlist(x)))
+#convert list to vector
+r2tmin2v <- unlist(r2tmin2, use.names = FALSE)
+#make data frame with window names
+namestmin<-colnames(fptminpredictors)
+tminswoutput<-as.data.frame(namestmin)
+#add pseudo r2 values to data frame with window names
+tminswoutput$r2<-r2tmin2v
+
+
+#add effect size
+estmin<-lapply(tmin_glms,function(x) coef(summary(x))[2,1])
+#convert to normal list
+estmin2<-lapply(estmin, function(x) as.numeric(unlist(x)))
+#convert list to vector
+estmin2v <- unlist(estmin2, use.names = FALSE)
+#add effect size values to data frame with window names
+tminswoutput$es<-estmin2v
+
+#add standard error
+#add effect size
+setmin<-lapply(tmin_glms,function(x) coef(summary(x))[2,2])
+#convert to normal list
+setmin2<-lapply(setmin, function(x) as.numeric(unlist(x)))
+#convert list to vector
+setmin2v <- unlist(setmin2, use.names = FALSE)
+#add effect size values to data frame with window names
+tminswoutput$se<-setmin2v
+
+#order by descending pseudo R2 value
+tminswoutput <- tminswoutput[rev(order(tminswoutput$r2)),]
+#subset to just five highest R2 values
+tminswoutput5 <- tminswoutput[1:5,]
+
+}
+
+  
+  #empty list
+subsamplelist = list()
+
+##for loop to run sliding window function and output collation for all data subsets
+for(i in 1:length(datasetslist)){
+  subsampleoutput <- subsamplefunc(datasetslist[[i]])
+subsamplelist[[i]] <- subsampleoutput 
+
+}
+
+allsubsampleslist = do.call(rbind, subsamplelist)
+#add in start and end years
+
+
+#add variables for start year, end year, window date and window duration
+allsubsamples <- as.data.frame(allsubsampleslist)
+allsubsamples$start <- rep(start, each = 5)
+allsubsamples$end <- rep(end, each = 5)
+allsubsamples$duration <- rep(durations, each = 5)
+
+allsubsamples$windowmid <- as.numeric(sub(".*\\_(.*?)\\_.*", "\\1", allsubsamples$namestmin))
+allsubsamples$windowwidth <- as.numeric(sub(".*\\_(.*?)\\.*", "\\1", substring(allsubsamples$namestmin,3,10)))
+```
+
+
+
+### test how subsample duration and timing affects results
+
+```{r}
+#model to test effect of subsample duration and start date on r2
+submod1 <- lm(r2 ~ duration + start, data = allsubsamples)
+summary(submod1)#significant effect of duration but not start date
+
+submod2 <- lm(es ~ duration + start, data = allsubsamples)
+summary(submod2)#no significant effect of duration or start date on effect size
+
+submod3 <- lm(se ~ duration + start, data = allsubsamples)
+summary(submod3)#estimates more variable with lower sample size
+
+#model for effect on window date
+submod4 <- lm(windowmid ~ duration + start, data = allsubsamples)
+summary(submod4)#window date becomes later with longer duration of samples, but no effect of start date - this suggests that the data are not systematically biased (i.e. no change in reaction norms over period of data set)
+
+#effect on window duration
+submod5 <- lm(windowwidth ~  duration + start, data = allsubsamples)
+summary(submod5)#window width is smaller when calculated with more recent data sets - unclear why this might be
+
+
+
+## try running the same tests on just the best model output from each subsample data set
+subsubsamples <- allsubsamples[seq(1,71, by = 5),]
+
+#model to test effect of subsample duration and start date on r2
+subsubmod1 <- lm(r2 ~ duration + start, data = subsubsamples)
+summary(subsubmod1)#significant effect of duration but not start date
+
+subsubmod2 <- lm(es ~ duration + start, data = subsubsamples)
+summary(subsubmod2)#marginal effect of start date
+
+subsubmod3 <- lm(se ~ duration + start, data = subsubsamples)
+summary(subsubmod3)#estimates more variable with lower sample size
+
+#model for effect on window date
+subsubmod4 <- lm(windowmid ~ duration + start, data = subsubsamples)
+summary(subsubmod4)#no effect 
+
+#effect on window duration
+subsubmod5 <- lm(windowwidth ~  duration + start, data = subsubsamples)
+summary(subsubmod5)#window width is smaller when calculated with more recent data sets - unclear why this might be
+plot(subsubmod1)
+hist(resid(subsubmod1))
+
+```
+
+
+
+
+
+## k fold cross validation
+
+```{r}
+##function to run k fold cross validation
+  kfoldfunc <- function(tempdata){  
+
+    ##run function for multiple window widths
+#create empty list
+datalist = list()
+
+#for loop over different window widths - creates sliding temperature windows
+for(i in c(5:60)){
+  
+  outputd2 <- windowed.average(tempdata, window.width = i)
+  
+  datalist[[i]] <- outputd2 
+}
+
+#combine outputs for each window width
+  tminwindows = do.call(cbind, datalist)
+  #add variable for year
+  tempdata$Year <- as.factor(tempdata$Year)
+  tminwindows$Year <- levels(tempdata$Year)
+
+  #sliding windows for minimum temperature
+  tminwindows <- as.data.frame(tminwindows)
+  
+
+##########################################################  
+  ###run for loop to get sliding windows for all years
+  #create empty list
+datalist2 = list()
+
+#for loop over different window widths - creates sliding temperature windows
+for(i in c(5:60)){
+  
+  outputd2 <- windowed.average(tminnj, window.width = i)
+  
+  datalist2[[i]] <- outputd2 
+}
+
+#combine outputs for each window width
+  alltminwindows = do.call(cbind, datalist2)
+  #add variable for year
+  tminnj$Year <- as.factor(tminnj$Year)
+  alltminwindows$Year <- levels(tminnj$Year)
+
+  #sliding windows for minimum temperature
+  alltminwindows <- as.data.frame(alltminwindows)
+#############################################################  
+
+  ###go back to subset data  
+  
+  #add number of flight periods to temperature window data frame
+  #format year correctly
+  tminwindows$Year <- as.character(tminwindows$Year)
+  tminwindows$Year <- as.numeric(tminwindows$Year)
+  #add number of flight periods in each year of the temperature data
+fptmin<-left_join(tminwindows,fpdf,by="Year")
+
+#glms of gen~tmin for each window
+#subset to just the temperature window predictor variables
+fptminpredictors<-subset(fptmin,select=-c(Year,Gen))
+#number of regressions based on number of windows
+tminnreg<-ncol(fptminpredictors)
+# run n regressions
+tmin_glms <- lapply(1:tminnreg, function(x) glm(fptmin$Gen ~ fptminpredictors[,x],family=binomial))
+
+#list of named characters of pseudo R2 values for each glm
+r2tmin<-lapply(tmin_glms,function(x) pR2(x)[5])
+#convert to normal list
+r2tmin2<-lapply(r2tmin, function(x) as.numeric(unlist(x)))
+#convert list to vector
+r2tmin2v <- unlist(r2tmin2, use.names = FALSE)
+
+#extract best window name and position
+maxr2 <- max(r2tmin2v)
+position <- match(maxr2, r2tmin2v)
+
+#extract temperature window for corresponding position
+bestwindowname <- colnames(fptminpredictors[position])
+bestwindow <- fptminpredictors[,position]
+bestwindowdf <- as.data.frame(bestwindow)
+bestwindowdf$Year <- tminwindows$Year
+
+#add flight periods for the years in the temperature data set
+fpbestwindow<-left_join(bestwindowdf,fpdf,by="Year")
+
+
+#re run best model with best temperature model
+bestmod <- glm(Gen ~ bestwindow, data = fpbestwindow, family = binomial)
+
+#data frame of temperature in best window in years not included in subsample
+tminbw <- alltminwindows[,bestwindowname]
+tminbw <- as.data.frame(tminbw)
+tminbw <- rename(tminbw, bestwindow = tminbw)
+tminbw$Year <- alltminwindows$Year
+
+tminbwother <- filter(tminbw, !Year %in% bestwindowdf$Year)
+
+fppreds <- predict(bestmod,newdata=tminbwother,type="response", se.fit = TRUE)
+fppreds<-as.data.frame(fppreds)
+tminbwother$preds<-fppreds$fit
+tminbwother$se <- fppreds$se.fit
+##predicted values on the response scale are the probability of 2 flight periods
+
+fpdfreal <- filter(fpdf, Year %in% tminbwother$Year)
+fpdfreal$Year <- as.character(fpdfreal$Year)
+
+tminfppred <- left_join(tminbwother, fpdfreal, by = "Year")
+tminfppred$predround <- round(tminfppred$preds)
+
+tminfppred$diff <- tminfppred$Gen - tminfppred$predround
+return(tminfppred)
+
+}
+
+  
+  
+  
+  ####define data sets of k fold cross validation
+#make sure year is numeric
+  #50 years of data - 10 data sets - 10 different sets of 5 years can be removed in turn
+
+startk <- c(fpdf[1,1], fpdf[6,1], fpdf[11,1], fpdf[16,1], fpdf[21,1], fpdf[26,1], fpdf[31,1], fpdf[36,1], fpdf[41,1], fpdf[46,1])
+
+endk <- c(fpdf[5,1], fpdf[10,1], fpdf[15,1], fpdf[20,1], fpdf[25,1], fpdf[30,1], fpdf[35,1], fpdf[40,1], fpdf[45,1], fpdf[50,1])
+
+startendk <- data.frame(startk = startk, endk = endk)
+
+#make sure year is a numeric variable
+tminnj$Year <- as.character(tminnj$Year)
+tminnj$Year <- as.numeric(tminnj$Year)
+
+##make list of temperature data subsets
+kfolddatalist = list()
+
+for(i in 1:nrow(startendk)){
+  subdf <- filter(tminnj, !Year %in% c(startendk[i,1]:startendk[i,2]))
+  kfolddatalist[[i]] <- subdf
+}
+  
+
+
+###run accuracy function for all k fold windows  
+ #empty list
+kfoldlist = list()
+
+##for loop to run sliding window function and output collation for all data subsets
+for(i in 1:length(kfolddatalist)){
+  kfoldoutput <- kfoldfunc(kfolddatalist[[i]])
+kfoldlist[[i]] <- kfoldoutput 
+
+}
+
+allkfoldlist = do.call(rbind, kfoldlist)
+
+
+#remove rows with NAs
+allkfoldlist2 <- na.omit(allkfoldlist)
+
+#check for bias in error - positive or negative number would show bias
+sum(allkfoldlist2$diff)
+
+#calculate accuracy
+##number of matches
+allkfoldlist2$difffac <- as.factor(allkfoldlist2$diff)
+nums <- allkfoldlist2 %>%
+ group_by(difffac)%>%
+ summarise(match = n())
+  
+
+#accuracy = number of matches divided by total number of comparisons
+accuracy = filter(nums, difffac == 0)[,2] / 50
+accuracy
+
+```
 
