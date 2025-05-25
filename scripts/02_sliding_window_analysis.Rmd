@@ -49,6 +49,41 @@ lrtest(yearmod1,yearmodnull)###year model is significantly better than null mode
 ```
 
 
+
+
+### plot number of flight periods against year using model output
+
+```{r}
+yeardf1 <- data.frame(Year = rep(1968:2023))
+yearfit1 <- predict(yearmod1, newdata = yeardf1, type = "response", se = TRUE)
+yearfit1 <- as.data.frame(yearfit1)
+yeardf1$preds<-yearfit1$fit
+#add variables for confidence intervals - 2 standard errors
+yeardf1$minse<-yearfit1$fit-2*(yearfit1$se.fit)
+yeardf1$maxse<-yearfit1$fit+2*(yearfit1$se.fit)
+
+
+yeargenplot <- ggplot(yeardf1,aes(x=Year,y=preds))+
+  geom_ribbon(aes(ymin = minse, ymax =  maxse),alpha=0.25) +
+  geom_line(linewidth=1.25)+
+  geom_point(data = fpdf, aes(x = Year, y = Gen))+
+  theme_classic()+
+  xlab("Year")+
+  ylab("Probability of Two Flight Periods")
+
+
+ggsave(filename = "outputs/figures/year_generation_predict_plot.png",
+       plot = yeargenplot,
+       device = "png",
+       width = 18,
+       height = 12,
+       units = "cm",
+       dpi = 300,
+       bg = "white")
+```
+
+
+
 ## read in temperature data
 
 
@@ -245,11 +280,19 @@ tmaxswoutput <- tmaxswoutput[rev(order(tmaxswoutput$r2)),]
 write.csv(tmaxswoutput, "outputs/tmax_sliding_window_glms_r2_effect_size.csv")
 
 
-##best model - highest R2
-#w_9_48
-modtmax9_48<-glm(Gen~w_9_48,data=fptmax,family=binomial)
-summary(modtmax9_48)
+##best model - highest R2 - 0.28
+#w_60_279.5
+modtmax60_279.5<-glm(Gen~w_60_279.5,data=fptmax,family=binomial)
+summary(modtmax60_279.5)
 ```
+
+actually day 179.5; day 179 is 30th day and day 180 is 31st day;
+
+therefore 179-29 = 150, start day is 150
+
+179 + 30 = 209, end day is 209
+
+
 
 
 
@@ -421,15 +464,54 @@ tmeanswoutput <- tmeanswoutput[rev(order(tmeanswoutput$r2)),]
 write.csv(tmeanswoutput, "outputs/tmean_sliding_window_glms_r2_effect_size.csv")
 
 
-##best model
-#w_22_287.5
-#window length 22 days
-#centred on day 287.5
-modtmean22_287.5<-glm(Gen~w_22_287.5,data=fptmean,family=binomial)
-summary(modtmean22_287.5)
-#day 287.5 - actually 187.5 - day 187 is day 11 - window starts day 177, ends day 198 
+##best model - r2 0.35
+#w_57_279
+#window length 57 days
+#centred on day 279
+modtmean57_279<-glm(Gen~w_57_279,data=fptmean,family=binomial)
+summary(modtmean57_279)
 ```
 
+day 279 is actually day 179
+day 179 is 29th day - there are 28 days prior to this and 28 days after
+start day = 179-28 = 151
+end day = 179 + 28 = 207
+
+
+
+
+## plot output from best model - minimum temperature window 49_276
+
+```{r}
+fptplotdf <- data.frame(w_49_276 = rep(seq(min(fptmin$w_49_276),max(fptmin$w_49_276),by = 0.01), length = 5000))
+fptfit <- predict(modtmin49_276, newdata = fptplotdf, type = "response", se = TRUE)
+fptfit <- as.data.frame(fptfit)
+fptplotdf$preds<-fptfit$fit
+#add variables for confidence intervals - 2 standard errors
+fptplotdf$minse<-fptfit$fit-2*(fptfit$se.fit)
+fptplotdf$maxse<-fptfit$fit+2*(fptfit$se.fit)
+
+
+tminplotgen <- ggplot(fptplotdf,aes(x=w_49_276,y=preds))+
+  geom_line(aes(x=w_49_276,y=preds))+
+  geom_ribbon(aes(ymin = minse, ymax =  maxse),alpha=0.25) +
+  geom_point(data=fptmin,aes(x=w_49_276,y=Gen))+
+  theme_classic()+
+  xlab("Mean Daily Minimum Temperature (\u00B0C) Between Days 152-200")+
+  ylab("Probability of Two Flight Periods")+
+  theme(plot.margin = margin(10, 12, 10, 10))
+tminplotgen
+
+ggsave(filename = "outputs/figures/tmin_generations_plot.png",
+       plot = tminplotgen,
+       device = "png",
+       width = 18,
+       height = 12,
+       units = "cm",
+       dpi = 300,
+       bg = "white")
+
+```
 
 
 
@@ -443,17 +525,9 @@ summary(modtmean22_287.5)
 
 
 
-### first test how the number of years of data included in a training data set and their temporal distance from the test data set affects prediction accuracy
-
-
-wouldn't be particularly informative to use a training and test data set here because the outputs from model predictions are only measurable in the data as 0 or 1 - just compare the effect size from models constructed using different numbers of years to determine how much the prediction and its precision changes
-
+### first test how the number of years of data and the timing of the data (old or recent) affects the model estimate
 
 50 years of data - divide into groups getting sequentially smaller or bigger by ten years - 11 groups ranging from 10 to 50 years in length
-
-re-run glms and compare effect size and r2 with the full data set 
-
-do effect size and r2 change with start date, end date or data set duration?
 
 1-10
 1-20
@@ -831,5 +905,153 @@ nums <- allkfoldlist2 %>%
 accuracy = filter(nums, difffac == 0)[,2] / 50
 accuracy
 
+```
+
+
+
+
+## find temperature at which probability of second flight period exceeds 0.5
+
+
+### best model = modtmin49_276
+
+effect size = 2.7874
+intercept = -27.2523
+
+#minimum temperature in critical window which gives 0.5 probability of occurrence of a second generation
+0.5 = 2.7874 * x -27.2523
+27.7523 = 2.7874x
+x=9.956339
+
+
+
+
+
+
+
+## test whether the critical temperature variable changed over the data set
+
+```{r}
+#linear model for effect of year on temperature
+tymod1 <- lm(w_49_276 ~ Year, data = tminwindows)
+summary(tymod1)#significant effect
+
+#chech residuals
+plot(tymod1)
+hist(resid(tymod1))
+```
+
+
+## plot change in temperature over time
+
+```{r}
+tempplotdf1 = data.frame(Year=rep(seq(from = 1968, to = 2023,by=0.1),length=1000))
+mintemppreds<-predict(tymod1,newdata=tempplotdf1, se.fit=TRUE,type="response")
+mintemppreds<-as.data.frame(mintemppreds)
+tempplotdf1$preds<-mintemppreds$fit
+#add variables for confidence intervals - 2 standard errors
+tempplotdf1$sel<-mintemppreds$fit-(2*mintemppreds$se.fit)
+tempplotdf1$seu<-mintemppreds$fit+(2*mintemppreds$se.fit)
+tempplotdf1$var <- "min"
+
+#also add data for mean and maximum temperature in their respective best windows
+tmaxmod1 <- lm(w_60_279.5 ~ Year, data = tmaxwindows)
+tempplotdf2 = data.frame(Year=rep(seq(from = 1968, to = 2023,by=0.1),length=1000))
+maxtemppreds<-predict(tmaxmod1,newdata=tempplotdf2, se.fit=TRUE,type="response")
+maxtemppreds<-as.data.frame(maxtemppreds)
+tempplotdf2$preds<-maxtemppreds$fit
+#add variables for confidence intervals - 2 standard errors
+tempplotdf2$sel<-maxtemppreds$fit-(2*maxtemppreds$se.fit)
+tempplotdf2$seu<-maxtemppreds$fit+(2*maxtemppreds$se.fit)
+tempplotdf2$var <- "max"
+
+tmeanmod1 <- lm(w_57_279 ~ Year, data = tmeanwindows)
+tempplotdf3 = data.frame(Year=rep(seq(from = 1968, to = 2023,by=0.1),length=1000))
+meantemppreds<-predict(tmeanmod1,newdata=tempplotdf3, se.fit=TRUE,type="response")
+meantemppreds<-as.data.frame(meantemppreds)
+tempplotdf3$preds<-meantemppreds$fit
+#add variables for confidence intervals - 2 standard errors
+tempplotdf3$sel<-meantemppreds$fit-(2*meantemppreds$se.fit)
+tempplotdf3$seu<-meantemppreds$fit+(2*meantemppreds$se.fit)
+tempplotdf3$var <- "mean"
+
+alltempplotdf <- rbind(tempplotdf1, tempplotdf2, tempplotdf3)
+
+tempplot <- ggplot(alltempplotdf,aes(x=Year,y=preds, color = var))+
+  geom_ribbon(aes(ymin = sel, ymax =  seu, fill = var),alpha=0.2) +
+  geom_line()+
+  geom_point(data=tminwindows,aes(x=Year,y=w_49_276), color = "blue")+
+  geom_point(data=tmaxwindows,aes(x=Year,y=w_60_279.5), color = "red")+
+  geom_point(data=tmeanwindows,aes(x=Year,y=w_57_279), color = "green")+
+  theme_classic()+
+  ylab("Temperature in Critical Window")
+tempplot
+
+ggsave(filename = "outputs/figures/all_temp_year_plot.png",
+       plot = tempplot,
+       device = "png",
+       width = 18,
+       height = 12,
+       units = "cm",
+       dpi = 300,
+       bg = "white")
+
+
+
+##plot temperature with number of generations
+fptminsub <- subset(fptmin, select = c("Gen", "Year", "w_49_276"))
+fptminsub$Gen <- as.factor(fptminsub$Gen)
+
+
+tempgenplot <- ggplot(tempplotdf1,aes(x=Year,y=preds))+
+  geom_ribbon(aes(ymin = sel, ymax =  seu),alpha=0.2) +
+  geom_line()+
+  geom_point(data=fptminsub,aes(x=Year,y=w_49_276, color = Gen))+
+  theme_classic()+
+  scale_color_manual(name = "Number of\nFlight Periods", labels = c("1", "2"), values = c("#7ad151", "#440154"))+
+  ylab("Temperature in Critical Window")
+tempgenplot
+
+ggsave(filename = "outputs/figures/temp_year_fp_plot.png",
+       plot = tempgenplot,
+       device = "png",
+       width = 18,
+       height = 12,
+       units = "cm",
+       dpi = 300,
+       bg = "white")
+```
+
+
+
+
+
+## test whether temperature in the critical window explains occurrence of a second flight period better than time
+
+```{r}
+#extract residuals from previous model of temperature against year
+yearresid <- tymod1$residuals
+#add to data frame
+tydf$yearresid <- yearresid
+
+
+#model containing both temperature and residuals of year as explanatory variables
+tyrmod1 <- glm(Gen ~ w_49_276 + yearresid, data = tydf, family = binomial)
+summary(tyrmod1)
+
+#model with only temperature
+tyrmod2 <- glm(Gen ~ w_49_276, data = tydf, family = binomial)
+summary(tyrmod2)
+
+#model with only year residuals
+tyrmod3 <- glm(Gen ~ yearresid, data = tydf, family = binomial)
+summary(tyrmod3)
+
+
+##compare models with AIC
+AIC(tyrmod1, tyrmod2, tyrmod3)
+
+
+###model with both explanatory variables is best
 ```
 

@@ -197,9 +197,11 @@ dev.off()
 ```{r}
 
 #gaussian mixture model assuming equal split between groups, means of week 21 and week 32, and sigma of 1
-mmw <- normalmixEM(vw_all, lambda = .5, mu = c(21, 32), sigma = 1)
+mmw <- normalmixEM(vw_all, lambda = .5, mu = c(22, 33), sigma = 1)
 summary(mmw)
 plot(mmw, which = 2)
+mmw2 <- normalmixEM(vw_all, lambda = .5, sigma = 1)
+summary(mmw2)
  
 #make data frame with posterior probability of each data point belonging to each flight period
 pdfw <- as.data.frame(mmw$posterior)
@@ -216,17 +218,22 @@ for(i in 1:nrow(Esil)){
 
 
 #add year and week to data set of posterior probabilities for each observation belonging to each flight period
-pdf2$Year <- vy
-pdf2$week <- vw_all
+pdfw$Year <- vy
+pdfw$week <- vw_all
+
+
+##write this to a csv - probability of each data point belonging to each flight period
+write.csv(pdfw, "outputs/f_p_probs_each_data_point.csv")
+
 
 #filter to only observations with high probability of belonging to second flight period
-pdf2sub <- filter(pdf2, comp.2 > 0.999)
+pdfwsub <- filter(pdfw, comp.2 > 0.999)
 
 
 #get list of years with high probability of two flight periods
-pdf2sub$Year <- as.character(pdf2sub$Year)
-pdf2sub$Year <- as.factor(pdf2sub$Year)
-years_2_fp <- c(levels(pdf2sub$Year))
+pdfwsub$Year <- as.character(pdfwsub$Year)
+pdfwsub$Year <- as.factor(pdfwsub$Year)
+years_w_fp <- c(levels(pdfwsub$Year))
 
 
 
@@ -246,7 +253,7 @@ fpdf <- filter(fpdf, Year %in% annualtotals$Year)
 
 #add number of flight periods in each year
 fpdf <- mutate(fpdf, Gen = case_when(
-  Year %in% years_2_fp ~ 1,
+  Year %in% years_w_fp ~ 1,
   .default = 0
 ))
 
@@ -255,6 +262,105 @@ fpdf <- mutate(fpdf, Gen = case_when(
 ##export data
 write.csv(fpdf, "outputs/flight_periods.csv")
 
+```
+
+
+
+
+
+
+## gaussian mixture model with binned data
+
+
+```{r}
+#loop to get data for gaussian mixture models for 5 year bins
+
+#empty list
+l_gmm <- list()
+
+#empty data frame
+# names <- c("startyear", "lambda", "mu", "sigma")
+# empty_df <- data.frame(matrix(nrow = 0, ncol = length(names))) 
+# colnames(empty_df) = names
+
+# empty_df <- data.frame()
+# empty_df$lambda <- NA
+
+#run loop
+for(x in levels(Esil$Year)){
+  
+  
+  df <- filter(Esil, Year %in% seq(as.numeric(x), as.numeric(x)+4))
+  df$Year <- as.character(df$Year)
+  df$Year <- as.numeric(df$Year)
+
+  #create empty list
+lw_sub <- list()
+
+#loop through each week in the data set and repeat the week for the corresponding number of moths caught during that week
+for(i in 1:nrow(df)){
+  lw_sub[[i]] <- rep(df[i,12], times = df[i,8])
+}
+
+#convert list to vector
+(vw_sub<-unlist(lw_sub))
+
+
+#run gaussian mixture model
+vw_sub_mod <- normalmixEM(vw_sub, maxrestarts = 10000)
+summary(vw_sub_mod)
+
+
+newdf <- data.frame(startyear = rep(x, times = 2), 
+                    distr = c(1,2),
+                               lambda = vw_sub_mod$lambda,
+                               mu = vw_sub_mod$mu, 
+                               sigma = vw_sub_mod$sigma)
+
+
+#write data frame to list
+l_gmm[[x]] <- newdf
+
+
+#file pathway to save plots
+filepathroot <- "outputs/figures/assigning_n_flight_periods/mixture_models_bins/plot"
+plotnum <- x
+filepath1 <- paste(filepathroot, plotnum, sep = "_")
+filepath2 <- paste(filepath1, ".png", sep = "")
+
+
+
+#plot gaussian mixture models
+
+#save png
+png(filepath2)
+#plot kernel density for all years
+plot(vw_sub_mod, which = 2)
+dev.off()
+
+}
+
+df_gmm <- do.call(rbind.data.frame, l_gmm)
+
+
+##create data frame with mu+/- sigma for each distribution, and determine whether there is any overlap between distributions in each year
+df_gmm$max <- df_gmm$mu + df_gmm$sigma
+df_gmm$min <- df_gmm$mu - df_gmm$sigma
+
+#find out whether mu2-sigma is less than mu1+sigma in any year
+overlap_df <- df_gmm %>% 
+  group_by(startyear) %>%
+  summarise(diff_1_2 = min[2]-max[1])
+
+#is mu1-sigma less than mu2+sigma in any year
+overlap_df_2 <- df_gmm %>% 
+  group_by(startyear) %>%
+  summarise(diff_2_1 = min[1]-max[2])
+
+##create new data frame with difference between mu1 and mu2 for each year, and corresponding sigma for mu2
+diff_df <- df_gmm %>% 
+  group_by(startyear) %>%
+  summarise(mu_diff = mu[1]-mu[2])
 ```
 
 

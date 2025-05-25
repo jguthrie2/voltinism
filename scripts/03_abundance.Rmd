@@ -1,0 +1,379 @@
+---
+title: "03_abundance"
+output: html_document
+date: "2025-05-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/Users/2298350G/Documents/My Documents/Moths/pre-PhD/E_silaceata/voltinism')
+library(dplyr)
+library(ggplot2)
+library(lmtest)
+library(glmmTMB)
+library(lme4)
+```
+
+
+
+
+## read in data containing one row for each individual E silaceata caught and the probability of it belonging to each flight period and use this to calculate abundance of each flight period in each year
+
+```{r}
+probs <- read.csv("outputs/f_p_probs_each_data_point.csv", header = TRUE, sep = ",")
+probs$Year <- as.factor(as.character(probs$Year))
+
+#create new variable for flight period assignment
+probs$Gen <- as.factor(round(probs$comp.2))
+
+#create new data set with abundance of each flight period in each year
+abun <- probs %>%
+  group_by(Year, Gen) %>%
+  summarise(count = n())
+```
+
+
+
+## sliding temperature window regression for number of individuals in first generation each year, also including number of individuals in previous generation and phenology of previous generation as explanatory variables
+
+
+```{r}
+#add rows for all years
+Year <- as.factor(1968:2024)
+allyearsdf <- as.data.frame(Year)
+
+abun2 <- left_join(allyearsdf, abun, by = "Year")
+
+#create variable for abundance of previous generation
+abun2$Ntminusone <- c(NA,head(abun2$count, -1))
+
+#create variable for phenology of previous generation
+abun2$Gentminusone <- as.factor(c(NA,head(as.character(abun2$Gen), -1)))
+
+#subset data to only include first generations in each year
+abun1 <- filter(abun2, Gen == 0)
+
+```
+
+
+## try modelling with average temperature april-august
+
+```{r}
+alltempnj
+
+subtemp <- alltempnj %>%
+  filter(julian %in% c(90:244)) %>%
+  group_by(Year) %>%
+  summarise(tmean = mean((tmin+tmax)/2))
+
+abun1t <- merge(abun1, subtemp, by = "Year")
+abun1tsub <- na.omit(abun1t)
+
+tmod1 <- glmmTMB(count ~ tmean + Ntminusone + Gentminusone + Ntminusone * Gentminusone,data = abun1tsub, family=nbinom1)
+summary(tmod1)
+
+tmod2 <- glmmTMB(count ~ tmean + Ntminusone + Gentminusone,data = abun1tsub, family=nbinom1)
+summary(tmod2)
+
+lrtest(tmod1,tmod2)#keep simple model
+
+tmod3 <- glmmTMB(count ~ tmean + Ntminusone ,data = abun1tsub, family=nbinom1)
+summary(tmod3)
+lrtest(tmod2,tmod3)#keep simple model
+
+tmod4 <- glmmTMB(count ~ tmean ,data = abun1tsub, family=nbinom1)
+summary(tmod4)
+lrtest(tmod3,tmod4)#keep complex model
+
+tmod5 <- glmmTMB(count ~  Ntminusone ,data = abun1tsub, family=nbinom1)
+lrtest(tmod3,tmod5)#keep complex model
+
+summary(tmod3)
+```
+
+
+##try splitting temperature into monthly average
+
+```{r}
+alltempnj1$Month <- month(alltempnj1$date)
+alltempnj1$Month <- as.factor(alltempnj1$Month)
+
+tmsum <- alltempnj1 %>%
+  group_by(Year, Month) %>%
+  summarise(tmean = mean((tmin+tmax)/2))
+
+tmsum$Month <- paste("m", tmsum$Month, sep = "_")
+
+tmsum2 <- tmsum %>%
+  pivot_wider(names_from = Month, values_from = tmean)
+
+tmsum2$total <- rowMeans(tmsum2[ , c(2,13)])
+
+tmsum3 <- na.omit(tmsum2)
+cor(tmsum3[,2:14])
+
+```
+
+
+## try getting deviation from average temperature spanning from previous winter to end of first generation - try october to june - newjulian 9 to 282
+
+```{r}
+tempws <- filter(alltempnj, newjulian %in% c(9:282))
+tempws$Year <- as.factor(tempws$Year)
+tempws$tmean <- (tempws$tmin + tempws$tmax) / 2
+
+trmod1 <- lmer(tmean ~ 1 + (1|Year), data = tempws)
+summary(trmod1)
+
+
+ranef(trmod1)
+yeartemp <- (ranef(trmod1))$Year
+yeartemp$yeartemp <- yeartemp$`(Intercept)`
+yeartemp$Year <- rownames(yeartemp)
+yeartemp <- subset(yeartemp, select = c(Year, yeartemp))
+yeartemp$Year <- as.factor(yeartemp$Year)
+
+abun1t <- merge(abun1, yeartemp, by = "Year")
+
+abun1t2 <- na.omit(abun1t)
+
+
+##model selection
+trmod1 <- glmmTMB(count ~ yeartemp + Ntminusone + Gentminusone + Ntminusone * Gentminusone,data = abun1t2, family=nbinom1)
+summary(trmod1)
+
+trmod2 <- glmmTMB(count ~ yeartemp + Ntminusone + Gentminusone,data = abun1t2, family=nbinom1)
+summary(trmod2)
+
+AIC(trmod1,trmod2)#keep simple model
+
+trmod3 <- glmmTMB(count ~ yeartemp + Ntminusone ,data = abun1t2, family=nbinom1)
+summary(trmod3)
+
+AIC(trmod2,trmod3)#keep simple model
+
+trmod4 <- glmmTMB(count ~ yeartemp,data = abun1t2, family=nbinom1)
+summary(trmod4)
+
+AIC(trmod3,trmod4)#keep complex model
+
+trmod5 <- glmmTMB(count ~  Ntminusone ,data = abun1t2, family=nbinom1)
+summary(trmod5)
+
+AIC(trmod3,trmod5)#simple model
+
+summary(trmod3)
+
+```
+
+
+## check using actual temperature values - same results so just use this for simplicity
+
+```{r}
+tempsum <- tempws %>%
+  group_by(Year)%>%
+  summarise(tmean = mean(tmean))
+abuntest <- merge(abun1, tempsum, by = "Year")
+
+
+abuntest <- na.omit(abuntest)
+
+
+##model selection
+trmod1test <- glmmTMB(count ~ tmean + Ntminusone + Gentminusone + Ntminusone * Gentminusone,data = abuntest, family=nbinom1)
+summary(trmod1test)
+
+trmod2test <- glmmTMB(count ~ tmean + Ntminusone + Gentminusone,data = abuntest, family=nbinom1)
+summary(trmod2test)
+
+lrtest(trmod1test, trmod2test)
+
+trmod3test <- glmmTMB(count ~ tmean + Ntminusone,data = abuntest, family=nbinom1)
+summary(trmod3test)
+lrtest(trmod2test,trmod3test)
+
+trmod4test <- glmmTMB(count ~ tmean ,data = abuntest, family=nbinom1)
+summary(trmod4test)
+lrtest(trmod3test,trmod4test)
+
+trmod5test <- glmmTMB(count ~ Ntminusone,data = abuntest, family=nbinom1)
+summary(trmod5test)
+lrtest(trmod3test,trmod5test)
+
+```
+
+
+
+## test whether using different subsets of data changes the random effect terms for temperature in each year significantly
+
+```{r}
+
+#make subset start later
+tempws1 <- filter(alltempnj, newjulian < 282)
+
+
+#create empty list
+datalist = list()
+
+#for loop over different window widths
+for(i in seq(from = 8, to = 252, by = 30)){
+  
+  tempws2 <- filter(tempws1, newjulian > i)
+  tempws2$Year <- as.factor(tempws2$Year)
+tempws2$tmean <- (tempws2$tmin + tempws2$tmax) / 2
+
+trsubmod <- lmer(tmean ~ 1 + (1|Year), data = tempws2)
+
+
+ranef(trsubmod)
+ytsub <- (ranef(trsubmod))$Year
+ytsub$yeartemp <- ytsub$`(Intercept)`
+ytsub$Year <- rownames(ytsub)
+ytsub <- subset(ytsub, select = c(Year, yeartemp))
+ytsub$startday <- i
+
+  datalist[[i]] <- ytsub 
+}
+
+#combine outputs for each window width
+  ytall = do.call(rbind, datalist)
+
+  ytall <- as.data.frame(ytall)
+  ytall$Year <- as.numeric(ytall$Year)
+
+  
+  
+#test whether start day of subset explains more variation than year  
+
+tsubmod1 <- lm(yeartemp ~ Year + startday, data = ytall)
+summary(tsubmod1)#start day not important
+#check with LRTs
+tsubmod2 <- lm(yeartemp ~ Year, data = ytall)
+lrtest(tsubmod1,tsubmod2)#keep model with just year
+tsubmod3 <- lm(yeartemp ~ startday, data = ytall)
+lrtest(tsubmod1,tsubmod3)#model with just start date is much worse than with year
+
+
+
+
+
+
+## check whether changing end date makes a difference
+
+#make subset start later
+tempws3 <- filter(alltempnj, newjulian > 8)
+
+
+#create empty list
+datalist = list()
+
+#for loop over different window widths
+for(i in seq(from = 38, to = 283, by = 30)){
+  
+  tempws4 <- filter(tempws3, newjulian < i)
+  tempws4$Year <- as.factor(tempws4$Year)
+tempws4$tmean <- (tempws4$tmin + tempws4$tmax) / 2
+
+trsubmod <- lmer(tmean ~ 1 + (1|Year), data = tempws4)
+
+
+ranef(trsubmod)
+ytsub <- (ranef(trsubmod))$Year
+ytsub$yeartemp <- ytsub$`(Intercept)`
+ytsub$Year <- rownames(ytsub)
+ytsub <- subset(ytsub, select = c(Year, yeartemp))
+ytsub$endday <- i
+
+  datalist[[i]] <- ytsub 
+}
+
+#combine outputs for each window width
+  ytall2 = do.call(rbind, datalist)
+
+  ytall2 <- as.data.frame(ytall2)
+  ytall2$Year <- as.numeric(ytall2$Year)
+
+  
+  
+    
+#test whether end day of subset explains more variation than year  
+
+tsubmod4 <- lm(yeartemp ~ Year + endday, data = ytall2)
+summary(tsubmod4)#end day not important
+#check with LRTs
+tsubmod5 <- lm(yeartemp ~ Year, data = ytall2)
+lrtest(tsubmod4,tsubmod5)#keep model with just year
+tsubmod6 <- lm(yeartemp ~ endday, data = ytall2)
+lrtest(tsubmod4,tsubmod6)#model with just end date is much worse than with year
+
+
+```
+
+
+
+
+
+
+
+### run sliding window model - just use minimum temperature
+
+```{r}
+##function to run models with monthly average temperature
+
+  #add abundances to data frame
+abuntemp<-left_join(abun1,tmsum2,by="Year")
+abuntemp <- na.omit(abuntemp)
+
+#glms of gen~tmin for each window
+#subset to just the temperature window predictor variables
+abuntemppredictors<-subset(abuntemp,select=-c(Year,Gen, count, Ntminusone, Gentminusone))
+#number of regressions based on number of windows
+tempreg<-ncol(abuntemppredictors)
+# run n regressions
+abuntemp_glms <- lapply(1:tempreg, function(x) glmmTMB(abuntemp$count ~ abuntemppredictors[,x] + abuntemp$Ntminusone + abuntemp$Gentminusone + abuntemp$Ntminusone * abuntemp$Gentminusone,family=nbinom1))
+
+#list of named characters of pseudo R2 values for each glm
+r2at<-lapply(abuntemp_glms,function(x) pR2(x)[5])
+#convert to normal list
+r2at2<-lapply(r2at, function(x) as.numeric(unlist(x)))
+#convert list to vector
+r2at2v <- unlist(r2at2, use.names = FALSE)
+
+#extract best window name and position
+maxr2 <- max(r2at2v)
+position <- match(maxr2, r2at2v)
+
+#extract temperature window for corresponding position
+bestwindowname <- colnames(abuntemppredictors[position])
+bestwindow <- abuntemppredictors[,position]
+bestwindowdf <- as.data.frame(bestwindow)
+bestwindowdf$Year <- abuntemp$Year
+
+#add flight periods for the years in the temperature data set
+abunbestwindow<-left_join(bestwindowdf,abun1,by="Year")
+
+
+#re run best model with best temperature model
+bestmod <- glmmTMB(count ~ bestwindow + Ntminusone + Gentminusone + Ntminusone * Gentminusone, data = abunbestwindow, family = nbinom1)
+
+summary(bestmod)
+
+
+#model selection
+bestmod2 <- glmmTMB(count ~ bestwindow + Ntminusone + Gentminusone , data = abunbestwindow, family = nbinom1)
+lrtest(bestmod,bestmod2)#keep simple model
+
+bestmod3 <- glmmTMB(count ~ bestwindow + Ntminusone , data = abunbestwindow, family = nbinom1)
+lrtest(bestmod2,bestmod3)#keep complex model
+
+bestmod4 <- glmmTMB(count ~ bestwindow + Gentminusone , data = abunbestwindow, family = nbinom1)
+lrtest(bestmod2,bestmod4)#keep complex model
+
+bestmod5 <- glmmTMB(count ~  Ntminusone + Gentminusone , data = abunbestwindow, family = nbinom1)
+lrtest(bestmod2,bestmod5)
+
+summary(bestmod2)
+```
+
+
+
