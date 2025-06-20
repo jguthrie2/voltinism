@@ -15,6 +15,7 @@ library(data.table)
 library(pscl)
 library(lubridate)
 library(DHARMa)
+library(questionr)
 ```
 
 
@@ -51,6 +52,9 @@ summary(yearmodnull)
 
 #likelihood ratio test - is year model better than null model
 lrtest(yearmod1,yearmodnull)###year model is significantly better than null model
+
+#odds ratio
+odds.ratio(yearmod1)
 ```
 
 
@@ -63,9 +67,9 @@ yeardf1 <- data.frame(Year = rep(1968:2023))
 yearfit1 <- predict(yearmod1, newdata = yeardf1, type = "response", se = TRUE)
 yearfit1 <- as.data.frame(yearfit1)
 yeardf1$preds<-yearfit1$fit
-#add variables for confidence intervals - 2 standard errors
-yeardf1$minse<-yearfit1$fit-2*(yearfit1$se.fit)
-yeardf1$maxse<-yearfit1$fit+2*(yearfit1$se.fit)
+#add variables for 95% confidence intervals 
+yeardf1$minse<-yearfit1$fit-1.96*(yearfit1$se.fit)
+yeardf1$maxse<-yearfit1$fit+1.96*(yearfit1$se.fit)
 
 
 yeargenplot <- ggplot(yeardf1,aes(x=Year,y=preds))+
@@ -336,6 +340,9 @@ fptmax<-left_join(fpdf,tmaxwindows,by="Year")
 #run model
 modtmax60_279.5<-glm(Gen~w_60_279.5,data=fptmax,family=binomial)
 summary(modtmax60_279.5)
+
+#odds ratio
+odds.ratio(modtmax60_279.5)
 ```
 
 
@@ -393,6 +400,9 @@ fptmin<-left_join(fpdf,tminwindows,by="Year")
 
 modtmin49_276<-glm(Gen~w_49_276,data=fptmin,family=binomial)
 summary(modtmin49_276)
+
+##odds ratio
+odds.ratio(modtmin49_276)
 ```
 
 
@@ -446,6 +456,9 @@ fptmean<-left_join(fpdf,tmeanwindows,by="Year")
 
 modtmean57_279<-glm(Gen~w_57_279,data=fptmean,family=binomial)
 summary(modtmean57_279)
+
+#odds ratio
+odds.ratio(modtmean57_279)
 ```
 
 
@@ -477,9 +490,9 @@ fptplotdf <- data.frame(w_49_276 = rep(seq(min(fptmin$w_49_276),max(fptmin$w_49_
 fptfit <- predict(modtmin49_276, newdata = fptplotdf, type = "response", se = TRUE)
 fptfit <- as.data.frame(fptfit)
 fptplotdf$preds<-fptfit$fit
-#add variables for confidence intervals - 2 standard errors
-fptplotdf$minse<-fptfit$fit-2*(fptfit$se.fit)
-fptplotdf$maxse<-fptfit$fit+2*(fptfit$se.fit)
+#add variables for 95% confidence intervals 
+fptplotdf$minse<-fptfit$fit-1.96*(fptfit$se.fit)
+fptplotdf$maxse<-fptfit$fit+1.96*(fptfit$se.fit)
 
 
 tminplotgen <- ggplot(fptplotdf,aes(x=w_49_276,y=preds))+
@@ -924,9 +937,9 @@ tempplotdf1 = data.frame(Year=rep(seq(from = 1968, to = 2023,by=0.1),length=1000
 mintemppreds<-predict(tymod1,newdata=tempplotdf1, se.fit=TRUE,type="response")
 mintemppreds<-as.data.frame(mintemppreds)
 tempplotdf1$preds<-mintemppreds$fit
-#add variables for confidence intervals - 2 standard errors
-tempplotdf1$sel<-mintemppreds$fit-(2*mintemppreds$se.fit)
-tempplotdf1$seu<-mintemppreds$fit+(2*mintemppreds$se.fit)
+#add variables for 95% confidence interval
+tempplotdf1$sel<-mintemppreds$fit-(1.96*mintemppreds$se.fit)
+tempplotdf1$seu<-mintemppreds$fit+(1.96*mintemppreds$se.fit)
 tempplotdf1$var <- "min"
 
 

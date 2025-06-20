@@ -129,12 +129,15 @@ lrtest(trmod3test2,trmod5test2)#marginally significant - keep complex model
 #examine final model
 summary(trmod3test2)
 
+#effect sizes - link function transformation
+exp(0.025404)#effect size for Ntminusone
+exp(0.265859)#effect size for temperature
+
 
 ##check residuals of final model
 trmod3test2resid <- simulateResiduals(fittedModel = trmod3test2, plot = F)
 plotQQunif(trmod3test2resid)
 plotResiduals(trmod3test2resid)
 ```
-
 
 
