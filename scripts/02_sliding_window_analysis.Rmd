@@ -64,17 +64,17 @@ odds.ratio(yearmod1)
 
 ```{r}
 yeardf1 <- data.frame(Year = rep(1968:2023))
-yearfit1 <- predict(yearmod1, newdata = yeardf1, type = "response", se = TRUE)
+yearfit1 <- predict(yearmod1, newdata = yeardf1, type = "link", se = TRUE)
 yearfit1 <- as.data.frame(yearfit1)
-yeardf1$preds<-yearfit1$fit
+yeardf1$preds<-plogis(yearfit1$fit)
 #add variables for 95% confidence intervals 
-yeardf1$minse<-yearfit1$fit-1.96*(yearfit1$se.fit)
-yeardf1$maxse<-yearfit1$fit+1.96*(yearfit1$se.fit)
+yeardf1$minse<-plogis(yearfit1$fit-1.96*(yearfit1$se.fit))
+yeardf1$maxse<-plogis(yearfit1$fit+1.96*(yearfit1$se.fit))
 
 
 yeargenplot <- ggplot(yeardf1,aes(x=Year,y=preds))+
   geom_ribbon(aes(ymin = minse, ymax =  maxse),alpha=0.25) +
-  geom_line(linewidth=1.25)+
+  geom_line()+
   geom_point(data = fpdf, aes(x = Year, y = Gen))+
   theme_classic()+
   xlab("Year")+
@@ -487,12 +487,12 @@ plotResiduals(modtmin49_276resid)
 ```{r}
 fptplotdf <- data.frame(w_49_276 = rep(seq(min(fptmin$w_49_276),max(fptmin$w_49_276),by = 0.01), length = 5000))
 #get predicted values
-fptfit <- predict(modtmin49_276, newdata = fptplotdf, type = "response", se = TRUE)
+fptfit <- predict(modtmin49_276, newdata = fptplotdf, type = "link", se = TRUE)
 fptfit <- as.data.frame(fptfit)
-fptplotdf$preds<-fptfit$fit
+fptplotdf$preds<-plogis(fptfit$fit)
 #add variables for 95% confidence intervals 
-fptplotdf$minse<-fptfit$fit-1.96*(fptfit$se.fit)
-fptplotdf$maxse<-fptfit$fit+1.96*(fptfit$se.fit)
+fptplotdf$minse<-plogis(fptfit$fit-1.96*(fptfit$se.fit))
+fptplotdf$maxse<-plogis(fptfit$fit+1.96*(fptfit$se.fit))
 
 
 tminplotgen <- ggplot(fptplotdf,aes(x=w_49_276,y=preds))+
