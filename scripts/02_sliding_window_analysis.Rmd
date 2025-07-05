@@ -500,19 +500,19 @@ tminplotgen <- ggplot(fptplotdf,aes(x=w_49_276,y=preds))+
   geom_ribbon(aes(ymin = minse, ymax =  maxse),alpha=0.25) +
   geom_point(data=fptmin,aes(x=w_49_276,y=Gen))+
   theme_classic()+
-  xlab("Mean Daily Minimum Temperature (\u00B0C) Between Days 152-200")+
+  xlab("Mean Daily Minimum Temperature (\u00B0C) Between 1st June and 19th July")+
   ylab("Probability of Two Flight Periods")+
   theme(plot.margin = margin(10, 12, 10, 10))
 tminplotgen
 
-# ggsave(filename = "outputs/figures/tmin_generations_plot.png",
-#        plot = tminplotgen,
-#        device = "png",
-#        width = 18,
-#        height = 12,
-#        units = "cm",
-#        dpi = 300,
-#        bg = "white")
+ggsave(filename = "outputs/figures/tmin_generations_plot.png",
+       plot = tminplotgen,
+       device = "png",
+       width = 18,
+       height = 12,
+       units = "cm",
+       dpi = 300,
+       bg = "white")
 
 ```
 
